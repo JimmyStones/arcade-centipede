@@ -21,7 +21,7 @@ module centipede_verilator;
    reg [7:0]  sw1/*verilator public_flat*/;
    reg [7:0]  sw2/*verilator public_flat*/;
    reg [9:0]  playerinput/*verilator public_flat*/;
-   
+
    centipede uut(
 		 .clk_12mhz(clk),
  		 .reset(reset),

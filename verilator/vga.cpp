@@ -97,6 +97,102 @@ void dpi_vga_init(int h, int v)
     init_stats();
 }
 
+int joystick_update() 
+{
+   SDL_PumpEvents();
+}
+int joystick_fire() 
+{
+   int fire = 0;
+   const Uint8 *state = SDL_GetKeyboardState(NULL);
+   if (state[SDL_SCANCODE_SPACE]) {
+    printf("<SPACE> is pressed.\n");
+    fire=1;
+    }
+   if (SDL_GameControllerGetButton(gGameController,SDL_CONTROLLER_BUTTON_X))
+     fire = 1;
+
+   return fire;
+}
+int joystick_start() 
+{
+   int start= 0;
+   const Uint8 *state = SDL_GetKeyboardState(NULL);
+   if (state[SDL_SCANCODE_1]) {
+    printf("<ONE> is pressed.\n");
+    start=1;
+    }
+   if (SDL_GameControllerGetButton(gGameController,SDL_CONTROLLER_BUTTON_START))
+     start= 1;
+
+   return start;
+}
+int joystick_coin() 
+{
+   int coin= 0;
+   const Uint8 *state = SDL_GetKeyboardState(NULL);
+   if (state[SDL_SCANCODE_5]) {
+    printf("<FIVE> is pressed.\n");
+    coin=1;
+    }
+   if (SDL_GameControllerGetButton(gGameController,SDL_CONTROLLER_BUTTON_LEFTSHOULDER))
+     coin= 1;
+
+   return coin;
+}
+int joystick_up() 
+{
+   int button= 0;
+   const Uint8 *state = SDL_GetKeyboardState(NULL);
+   if (state[SDL_SCANCODE_UP]) {
+  //  printf("<UP> is pressed.\n");
+    button=1;
+    }
+   if (SDL_GameControllerGetButton(gGameController,SDL_CONTROLLER_BUTTON_DPAD_UP))
+     button= 1;
+
+   return button;
+}
+int joystick_down() 
+{
+   int button= 0;
+   const Uint8 *state = SDL_GetKeyboardState(NULL);
+   if (state[SDL_SCANCODE_DOWN]) {
+  //  printf("<DOWN> is pressed.\n");
+    button=1;
+    }
+   if (SDL_GameControllerGetButton(gGameController,SDL_CONTROLLER_BUTTON_DPAD_DOWN))
+     button= 1;
+
+   return button;
+}
+
+int joystick_right() 
+{
+   int button= 0;
+   const Uint8 *state = SDL_GetKeyboardState(NULL);
+   if (state[SDL_SCANCODE_RIGHT]) {
+    //printf("<RIGHT> is pressed.\n");
+    button=1;
+    }
+   if (SDL_GameControllerGetButton(gGameController,SDL_CONTROLLER_BUTTON_DPAD_RIGHT))
+     button= 1;
+
+   return button;
+}
+int joystick_left() 
+{
+   int button= 0;
+   const Uint8 *state = SDL_GetKeyboardState(NULL);
+   if (state[SDL_SCANCODE_LEFT]) {
+    //printf("<LEFT> is pressed.\n");
+    button=1;
+    }
+   if (SDL_GameControllerGetButton(gGameController,SDL_CONTROLLER_BUTTON_DPAD_LEFT))
+     button= 1;
+
+   return button;
+}
 
 //static int eol;
 //static int eof;

@@ -7,6 +7,8 @@ CODE_ROMS_SRC = \
 
 PROM_SRC = ../src/centiped1/136001-113.p4
 
+EAROM_SRC = ../src/earom
+
 PF_ROM_SRC = \
 	../src/centiped1/136001-111.f7 \
 	../src/centiped1/136001-112.hj7
@@ -17,7 +19,11 @@ PF_ROM_SRC = \
 all: \
 	rom_code_case.v \
 	rom_f7_case.v rom_hj7_case.v \
-	prom_p4.v
+	prom_p4.v \
+	earom.v
+
+earom.v: dump2p
+	./dump2p <$(EAROM_SRC) >$@
 
 prom_p4.v: dump2p
 	./dump2p <$(PROM_SRC) >$@

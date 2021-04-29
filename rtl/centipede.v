@@ -108,6 +108,7 @@ module centipede(
    
    wire       pload_n;
    wire       write_n;
+   wire       write2_n;
    wire       brw_n;
    
    wire [15:0] pdf;
@@ -345,7 +346,6 @@ module centipede(
 	   .dout(ram_out[7:0]),
 	   .cs_n(ram0_n),
    	   .we_n(write_n));
-
 //
 `ifdef debug_ram
    always @(posedge s_6mhz)
@@ -467,13 +467,7 @@ module centipede(
 		   (ab[13:10] == 4'b1001) ? 10'b0111111111 :
 		   10'b1111111111;
 
-//   assign write2_n = ~(s_6mhz & ~write_n);
-   reg write2_n;
-   always @(posedge s_6mhz)
-     if (reset)
-       write2_n <= 0;
-     else
-       write2_n <= write_n;
+   assign write2_n = ~(s_6mhz & ~write_n);
    
    assign steerclr_n = adecode[9] | write2_n;
    assign watchdog_n = adecode[8] | write2_n;
@@ -900,29 +894,44 @@ module centipede(
 `endif
    
    // High Score Memory Circuitry
-
-   assign hs_addr_clk = ~(~ea_addr_n & ~write2_n);
-   assign hs_ctrl_clk = ~(~ea_ctrl_n & ~write2_n);
+   assign hs_addr_clk = ea_addr_n | write2_n;
+   assign ea_ctrl_clk = ea_ctrl_n | write2_n;
 
    always @(posedge hs_addr_clk)
+   begin
      hs_addr <= ab[5:0];
+     $display("hs_addr %b",hs_addr);
+     hs_data <= db_out[7:0];
+     //$display("hs_data %b",hs_data);
+   end
+
+   reg hs_clk;
+   reg hs_cs1;
+   reg hs_c1;
+   reg hs_c2;
 
    always @(posedge ea_ctrl_clk)
-     hs_ctrl <= db_out[3:0];
+   begin    
+    hs_ctrl <= db_out[3:0];
+    hs_clk <= hs_ctrl[0];
+    hs_c1 <= ~hs_ctrl[1];
+    hs_c2 <= hs_ctrl[2];
+    hs_cs1 <= hs_ctrl[3];
+    if (hs_cs1)
+      $display("hs_c2=%b hs_c1=%b hs_clk=%b", hs_c2, hs_c1, hs_clk);
+   end
 
    hs_ram hs_ram(
-		 .clk(hs_ctrl[0]),
-		 .reset(reset),
+		 .clk(s_12mhz),
 		 .a(hs_addr),
 		 .dout(hs_out),
 		 .din(hs_data),
-		 .c1(~hs_ctrl[1]),
-		 .c2(hs_ctrl[2]),
-		 .cs1(hs_ctrl[3])
-		 );
+     .rclk(hs_clk),
+		 .c1(hs_c1),
+		 .c2(hs_c2),
+		 .cs1(hs_cs1)
 
-   always @(posedge hs_addr_clk)
-     hs_data <= db_out[7:0];
+		 );
 
    // Joystick Circuitry
    wire js1_right, js1_left, js1_down, js1_up;
