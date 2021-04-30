@@ -10,6 +10,8 @@ module hs_ram(
 	    input 	   c2,
 	    input 	   cs1);
    
+   integer STDERR = 32'h8000_0002;
+
    reg [7:0] d;
    assign dout = d;
    
@@ -30,12 +32,12 @@ module hs_ram(
 	 begin
 		 if(c1==1'b0 && c2==1'b0)
 		 begin
-		 	$display("hs_write");
+		 	$fdisplay(STDERR,"hs_write");
 			mem[a] <= din;
 		 end 
 		 if(c1==1'b0 && c2==1'b1)
 		 begin
-		 	$display("hs_erase");
+		 	$fdisplay(STDERR,"hs_erase");
 			mem[a] <= 8'h00;
 		 end
 	 end 
@@ -46,7 +48,7 @@ module hs_ram(
 	   if(cs1 == 1'b1 && c1 == 1'b1 && c2 == 1'b0)
 	   begin
 	   	d <= mem[a];
-		$display("hs_read %b > %b", a, mem[a]);
+		$fdisplay(STDERR,"hs_read %b > %b", a, mem[a]);
 	   end
    end
 

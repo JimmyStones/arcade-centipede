@@ -46,6 +46,8 @@ module centipede(
 		 output	      clk_6mhz_o
 		 );
 
+   integer STDERR = 32'h8000_0002;
+   
    //
    wire s_12mhz, s_12mhz_n;
    wire s_6mhz, s_6mhz_n;
@@ -218,6 +220,7 @@ module centipede(
 
 //   initial
 //     h_counter = 0;
+
    
    always @(posedge s_12mhz or posedge reset)
      if (reset)
@@ -350,7 +353,7 @@ module centipede(
 `ifdef debug_ram
    always @(posedge s_6mhz)
      if (~ram0_n & ~write_n)
-       $display("ram: %x <- %x", ab[9:0], db_out);
+       $fdisplay(STDERR,"ram: %x <- %x", ab[9:0], db_out);
 `endif
 //
    
@@ -369,8 +372,8 @@ module centipede(
    
 `ifdef debug_irq
    //---
-   always @(negedge irq) $display("irq: assert");
-   always @(posedge irq) $display("irq: deassert");
+   always @(negedge irq) $fdisplay(STDERR,"irq: assert");
+   always @(posedge irq) $fdisplay(STDERR,"irq: deassert");
    //---
 `endif
    
@@ -591,7 +594,7 @@ module centipede(
 `ifdef debug_match
    always @(posedge s_6mhz)
      if (hblank & ~match_n && pfa != 0 && pfd_hold != 0)
-       $display("mo: match pfa %x pfd %x mga %x line %x hpos %x (%x)",
+       $fdisplay(STDERR,"mo: match pfa %x pfd %x mga %x line %x hpos %x (%x)",
 		pfa, pfd, mga,
 		{s_128v, s_64v, s_32v, s_16v, s_8v, s_4v, s_2v, s_1v},
 		pfd_hold[23:16], pfd_hold);
@@ -662,7 +665,7 @@ module centipede(
 `ifdef debug_match
 	      begin
 		 line_ram_ctr <= pfd_hold[23:16];
-		 $display("line ram ctr <= %x", pfd_hold[23:16]);
+		 $fdisplay(STDERR,"line ram ctr <= %x", pfd_hold[23:16]);
 	      end
 `else
 	      line_ram_ctr <= pfd_hold[23:16];
@@ -809,12 +812,12 @@ module centipede(
    //---
    always @(posedge s_6mhz)
      begin
-	if (~in0_n && ab[0] == 0) $display("playerin: read%x %x", ab[0], playerin_out);
-	if (~in1_n) $display("joystick: read%x %x", ab[0], joystick_out);   
-	if (~swrd_n) $display("switch: read%x %x", ab[0], switch_out);
-	if (~irqres_n & mpu_reset_n) $display("irq: ack");
-	if (~pokey_n & 0) $display("pokey: read %x -> %x", ab[3:0], pokey_out);
-	if (~pframrd_n) $display("pf: %x -> %x (ab %x pfd %x)", pfa, pf[7:0], ab, pfd);
+	if (~in0_n && ab[0] == 0) $fdisplay(STDERR,"playerin: read%x %x", ab[0], playerin_out);
+	if (~in1_n) $fdisplay(STDERR,"joystick: read%x %x", ab[0], joystick_out);   
+	if (~swrd_n) $fdisplay(STDERR,"switch: read%x %x", ab[0], switch_out);
+	if (~irqres_n & mpu_reset_n) $fdisplay(STDERR,"irq: ack");
+	if (~pokey_n & 0) $fdisplay(STDERR,"pokey: read %x -> %x", ab[3:0], pokey_out);
+	if (~pframrd_n) $fdisplay(STDERR,"pf: %x -> %x (ab %x pfd %x)", pfa, pf[7:0], ab, pfd);
      end
    //---
 `endif
@@ -883,13 +886,13 @@ module centipede(
    always @(pfwr3_n or pfwr2_n or pfwr1_n or pfwr0_n)
      begin
 	if (~pfwr3_n)
-	  $display("pf: 3 %x <- %x", pfa, db_out[7:0]);
+	  $fdisplay(STDERR,"pf: 3 %x <- %x", pfa, db_out[7:0]);
 	if (~pfwr2_n)
-	  $display("pf: 2 %x <- %x", pfa, db_out[7:0]);
+	  $fdisplay(STDERR,"pf: 2 %x <- %x", pfa, db_out[7:0]);
 	if (~pfwr1_n)
-	  $display("pf: 1 %x <- %x", pfa, db_out[7:0]);
+	  $fdisplay(STDERR,"pf: 1 %x <- %x", pfa, db_out[7:0]);
 	if (~pfwr0_n)
-	  $display("pf: 0 %x <- %x", pfa, db_out[7:0]);
+	  $fdisplay(STDERR,"pf: 0 %x <- %x", pfa, db_out[7:0]);
      end
 `endif
    
@@ -900,9 +903,9 @@ module centipede(
    always @(posedge hs_addr_clk)
    begin
      hs_addr <= ab[5:0];
-     $display("hs_addr %b",hs_addr);
+     $fdisplay(STDERR,"hs_addr %b",hs_addr);
      hs_data <= db_out[7:0];
-     //$display("hs_data %b",hs_data);
+     //$fdisplay(STDERR,"hs_data %b",hs_data);
    end
 
    reg hs_clk;
@@ -918,7 +921,7 @@ module centipede(
     hs_c2 <= hs_ctrl[2];
     hs_cs1 <= hs_ctrl[3];
     if (hs_cs1)
-      $display("hs_c2=%b hs_c1=%b hs_clk=%b", hs_c2, hs_c1, hs_clk);
+      $fdisplay(STDERR,"hs_c2=%b hs_c1=%b hs_clk=%b", hs_c2, hs_c1, hs_clk);
    end
 
    hs_ram hs_ram(
@@ -981,9 +984,9 @@ module centipede(
    
 `ifdef debug_vblank
    always @(posedge vblank)
-     $display("vblank: on");
+     $fdisplay(STDERR,"vblank: on");
    always @(negedge vblank)
-     $display("vblank: off");
+     $fdisplay(STDERR,"vblank: off");
 `endif
    
    // Coin Counter Output

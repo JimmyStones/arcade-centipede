@@ -48,3 +48,4 @@ verilator_new/Debug/*
 verilator_new/Release/*
 verilator_new/obj_dir/*
 verilator_new/.vs/*
+verilator_new/.vs/sim/*

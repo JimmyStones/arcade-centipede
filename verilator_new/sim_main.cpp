@@ -1,5 +1,6 @@
 #include <iostream>
 #include <fstream>
+#include <sstream>
 #include <string>
 #include <stdio.h>
 #include <stdlib.h>
@@ -62,6 +63,10 @@ static ID3D11DepthStencilState* g_pDepthStencilState = NULL;
 static int                      g_VertexBufferSize = 5000, g_IndexBufferSize = 10000;
 #endif
 
+/// 
+bool showDebugConsole = true;
+const char* windowTitle = "Virtual Dev Board v1.0";
+
 // Instantiation of module.
 Vtop* top = NULL;
 
@@ -69,6 +74,8 @@ Vtop* top = NULL;
 // -----
 //#define VGA_WIDTH 257
 //#define VGA_HEIGHT 240
+#define TEX_WIDTH 512
+#define TEX_HEIGHT 512
 #define VGA_WIDTH 512
 #define VGA_HEIGHT 512
 int pix_count = 0;
@@ -86,7 +93,7 @@ int line_count = 0;
 
 // Simulation control
 // -----------
-bool run_enable = 0;
+bool run_enable = 1;
 bool single_step = 0;
 bool multi_step = 0;
 int multi_step_amount = 1024;
@@ -148,9 +155,7 @@ HRESULT CreateDeviceD3D(HWND hWnd)
 	const D3D_FEATURE_LEVEL featureLevelArray[2] = { D3D_FEATURE_LEVEL_11_0, D3D_FEATURE_LEVEL_10_0, };
 	if (D3D11CreateDeviceAndSwapChain(NULL, D3D_DRIVER_TYPE_HARDWARE, NULL, createDeviceFlags, featureLevelArray, 2, D3D11_SDK_VERSION, &sd, &g_pSwapChain, &g_pd3dDevice, &featureLevel, &g_pd3dDeviceContext) != S_OK)
 		return E_FAIL;
-
 	CreateRenderTarget();
-
 	return S_OK;
 }
 
@@ -198,79 +203,87 @@ double sc_time_stamp() {	// Called by $time in Verilog.
 
 uint32_t* disp_ptr = NULL;
 uint32_t* vga_ptr = NULL;
-
-unsigned int disp_size = VGA_WIDTH * VGA_HEIGHT * 4;
-uint32_t vga_size = VGA_WIDTH * VGA_HEIGHT * 4;
-
+unsigned int disp_size = TEX_WIDTH * TEX_HEIGHT * 4;
+uint32_t vga_size = TEX_WIDTH * TEX_HEIGHT * 4;
 
 DebugConsole console;
+//std::stringstream buffer;
+//std::streambuf* old = std::cerr.rdbuf(buffer.rdbuf());
 
-static void ShowDebugConsole(bool* p_open)
-{
-	
-	console.Draw("Debug Log", p_open);
+int initialReset = 48;
+
+
+void resetSimulation() {
+	main_time = 0;
+	top->clk_vid = 0;
+	top->clk_sys = 0;
+	top->reset = 1;
 }
-
-
 
 int verilate() {
 
 	if (!Verilated::gotFinish()) {
 
-		if (main_time < 48) {
-			top->reset = 1;   	// Assert reset (active HIGH)
-		}
-		if (main_time == 48) {	// Do == here, so we can still reset it in the main loop.
-			top->reset = 0;		// Deassert reset.
-		}
+		// Assert reset during startup
+		if (main_time < initialReset) { top->reset = 1; }
+		// Deassert reset after startup
+		if (main_time == initialReset) { top->reset = 0; }
 
 		top->clk_vid = !top->clk_vid;
 		top->clk_sys = !top->clk_sys;
 
 		if (top->clk_vid == 1) {
 
-			pix_count++;
-
-			rgb[0] = top->VGA_B;
-			rgb[1] = top->VGA_G;
-			rgb[2] = top->VGA_R;
-			uint32_t vga_addr = (line_count * VGA_WIDTH) + pix_count;
-
-			bool draw = !(top->VGA_HB || top->VGA_VB);
-
+			bool draw = (!(top->VGA_HB || top->VGA_VB));
 			if (draw) {
+				rgb[0] = top->VGA_B;
+				rgb[1] = top->VGA_G;
+				rgb[2] = top->VGA_R;
+
+//				int yo = - 
+				//yo += (TEX_HEIGHT - VGA_HEIGHT);
+
+				int yo = -192;
+
+				int y = TEX_HEIGHT - (pix_count + yo);
+				int xs = TEX_WIDTH;
+				int x = line_count -5;
+				if (x < 0) { x = 0; }
+				if (x > TEX_WIDTH - 1) { x = TEX_WIDTH - 1; }
+				if (y < 0) { y = 0; }
+				if (y > TEX_HEIGHT - 1) { y = TEX_HEIGHT - 1; }
+
+				uint32_t vga_addr = (y * xs) + x;
 				disp_ptr[vga_addr] = 0xFF000000 | rgb[0] << 16 | rgb[1] << 8 | rgb[2];	// Our debugger framebuffer is in the 32-bit RGBA format.
 			}
-			if (prev_hsync && !top->VGA_HS) {
-				console.AddLog("HSYNC pixel: %d line: %d", pix_count, line_count);
+
+			pix_count++;
+
+			if (!prev_hsync && top->VGA_HS) {
+				//console.AddLog("HSYNC pixel: %d line: %d", pix_count, line_count);
 				line_count++;
 				pix_count = 0;
 			}
+			prev_hsync = top->VGA_HS;
 
-			if (prev_vsync && !top->VGA_VS) {
-				console.AddLog("VSYNC pixel: %d line: %d", pix_count, line_count);
+			if (!prev_vsync && top->VGA_VS) {
+				//console.AddLog("VSYNC pixel: %d line: %d", pix_count, line_count);
 				frame_count++;
 				line_count = 0;
-				pix_count = 0;
 
 				GetSystemTime(&actualtime);
 				time_ms = (actualtime.wSecond * 1000) + actualtime.wMilliseconds;
-
 				frame_time = time_ms - old_time;
 				old_time = time_ms;
-
 				fps = 1000.0 / frame_time;
-
-				console.AddLog("Frame: %06d  frame_time: %06d fps: %06f", frame_count, frame_time, fps);
+				//console.AddLog("Frame: %06d  frame_time: %06d fps: %06f", frame_count, frame_time, fps);
 			}
-
-			prev_hsync = top->VGA_HS;
 			prev_vsync = top->VGA_VS;
 		}
 
 		if (top->clk_sys) { ioctl_download_before_eval(); }
 		/*else if (ioctl_file)
-			printf("skipping download this cycle %d\n",top->clk_sys);*/
+			console.AddLog("skipping download this cycle %d\n",top->clk_sys);*/
 
 		top->eval();            // Evaluate model!
 
@@ -293,32 +306,30 @@ void ioctl_download_setfile(char* file, int index)
 	top->ioctl_addr = ioctl_next_addr;
 	top->ioctl_index = index;
 	ioctl_file = fopen(file, "rb");
-	if (!ioctl_file) printf("error opening %s\n", file);
+	if (!ioctl_file) {
+		console.AddLog("error opening %s\n", file);
+	}
 }
 int nextchar = 0;
 void ioctl_download_before_eval()
 {
 	if (ioctl_file) {
-		//printf("ioctl_download_before_eval %x\n",top->ioctl_addr);
+		console.AddLog("ioctl_download_before_eval %x\n",top->ioctl_addr);
 		if (top->ioctl_wait == 0) {
 			top->ioctl_download = 1;
 			top->ioctl_wr = 1;
-
 			if (feof(ioctl_file)) {
 				fclose(ioctl_file);
 				ioctl_file = NULL;
 				top->ioctl_download = 0;
 				top->ioctl_wr = 0;
-				printf("finished upload\n");
-
+				console.AddLog("finished upload\n");
 			}
 			if (ioctl_file) {
 				int curchar = fgetc(ioctl_file);
 				if (feof(ioctl_file) == 0) {
-					//	    		if (curchar!=EOF) {
-									//top->ioctl_dout=(char)curchar;
 					nextchar = curchar;
-					//printf("ioctl_download_before_eval: dout %x \n",top->ioctl_dout);
+					console.AddLog("ioctl_download_before_eval: dout %x \n",top->ioctl_dout);
 					ioctl_next_addr++;
 				}
 			}
@@ -328,27 +339,28 @@ void ioctl_download_before_eval()
 		top->ioctl_download = 0;
 		top->ioctl_wr = 0;
 	}
-
 }
+
 void ioctl_download_after_eval()
 {
 	top->ioctl_addr = ioctl_next_addr;
 	top->ioctl_dout = (unsigned char)nextchar;
 	if (ioctl_file) {
-		console.AddLog("ioctl_download_after_eval %x wr %x dl %x\n", top->ioctl_addr, top->ioctl_wr, top->ioctl_download); console;
+		console.AddLog("ioctl_download_after_eval %x wr %x dl %x\n", top->ioctl_addr, top->ioctl_wr, top->ioctl_download);
 	}
 }
 
-void start_load_image() {
-	ioctl_download_setfile("..\\Image Examples\\bird.bin", 0);
-}
-
+//void start_load_image() {
+//	ioctl_download_setfile("..\\Image Examples\\bird.bin", 0);
+//}
 
 int main(int argc, char** argv, char** env) {
 
+
+	Verilated::setDebug(console);
+
 	disp_ptr = (uint32_t*)malloc(disp_size);
 	vga_ptr = (uint32_t*)malloc(vga_size);
-
 
 #ifdef WIN32
 	// Create application window
@@ -371,7 +383,7 @@ int main(int argc, char** argv, char** env) {
 	// Setup SDL
 	if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_TIMER | SDL_INIT_GAMECONTROLLER) != 0)
 	{
-		printf("Error: %s\n", SDL_GetError());
+		console.AddLog("Error: %s\n", SDL_GetError());
 		return -1;
 	}
 	top = new Vtop();
@@ -399,7 +411,6 @@ int main(int argc, char** argv, char** env) {
 
 	// Setup Dear ImGui style
 	ImGui::StyleColorsDark();
-	//ImGui::StyleColorsClassic();
 
 #ifdef WIN32
 	// Setup Platform/Renderer bindings
@@ -418,11 +429,11 @@ int main(int argc, char** argv, char** env) {
 	memset(vga_ptr, 0xAA, vga_size);
 
 	// Our state
-	ImVec4 clear_color = ImVec4(0.45f, 0.55f, 0.60f, 1.00f);
+	ImVec4 clear_color = ImVec4(0.25f, 0.35f, 0.40f, 0.80f);
 
 	// Build texture atlas
-	int width = VGA_WIDTH;
-	int height = VGA_HEIGHT;
+	int width = TEX_WIDTH;
+	int height = TEX_HEIGHT;
 
 #ifdef WIN32
 	// Upload texture to graphics system
@@ -441,7 +452,6 @@ int main(int argc, char** argv, char** env) {
 	ID3D11Texture2D* pTexture = NULL;
 	D3D11_SUBRESOURCE_DATA subResource;
 	subResource.pSysMem = disp_ptr;
-	//subResource.pSysMem = vga_ptr;
 	subResource.SysMemPitch = desc.Width * 4;
 	subResource.SysMemSlicePitch = 0;
 	g_pd3dDevice->CreateTexture2D(&desc, &subResource, &pTexture);
@@ -481,17 +491,10 @@ int main(int argc, char** argv, char** env) {
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
 	glPixelStorei(GL_UNPACK_ROW_LENGTH, 0);
-
-
-
 	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, VGA_WIDTH, VGA_HEIGHT, 0, GL_RGBA, GL_UNSIGNED_BYTE, disp_ptr);
 	ImTextureID my_tex_id = (ImTextureID)tex;
-
-
-	//    ImTextureID my_tex_id = (ImTextureID) renderedTexture;
 #endif
 
-	static bool show_app_console = true;
 
 #ifdef WIN32
 	// imgui Main loop stuff...
@@ -540,21 +543,44 @@ int main(int argc, char** argv, char** env) {
 
 		ImGui::NewFrame();
 
-		ShowDebugConsole(&show_app_console);
+		console.Draw("Debug Log", &showDebugConsole);
 
-		ImGui::Begin("Virtual Dev Board v1.0");		// Create a window called "Virtual Dev Board v1.0" and append into it.
-		ImGui::SetWindowPos("Virtual Dev Board v1.0", ImVec2(600, 40), ImGuiCond_Once);
-		ImGui::SetWindowSize("Virtual Dev Board v1.0", ImVec2(900, 900), ImGuiCond_Once);
-		if (ImGui::Button("RESET")) { top->reset = 1; main_time = 0; }
-		ImGui::Text("main_time: %d frame_count: %d", main_time, frame_count);
-		ImGui::Text("Application average %.3f ms/frame (%.1f FPS)", 1000.0f / io.Framerate, io.Framerate);
+		//bool more = true;
+		//while (more)
+		//{
+		//	//std::string text = buffer.str();
+		//	if (text.length() > 0) {
+		//		console.AddLog(text.c_str());
+		//	}
+		//	else {
+		//		more = false;
+		//	}
+		//}
+
+		ImGui::Begin(windowTitle);
+		ImGui::SetWindowPos(windowTitle, ImVec2(600, 40), ImGuiCond_Once);
+		ImGui::SetWindowSize(windowTitle, ImVec2(900, 900), ImGuiCond_Once);
+
+		if (ImGui::Button("RESET")) { resetSimulation(); } ImGui::SameLine();
+		if (ImGui::Button("START")) { run_enable = 1; } ImGui::SameLine();
+		if (ImGui::Button("STOP")) { run_enable = 0; } ImGui::SameLine();
 		ImGui::Checkbox("RUN", &run_enable);
+		ImGui::SliderInt("Batch size", &batchSize, 1, 1000000);
+
 		if (single_step == 1) { single_step = 0; }
 		if (ImGui::Button("Single Step")) { run_enable = 0; single_step = 1; }
+		ImGui::SameLine();
 		if (multi_step == 1) { multi_step = 0; }
 		if (ImGui::Button("Multi Step")) { run_enable = 0; multi_step = 1; }
-		ImGui::SameLine(); ImGui::SliderInt("Step amount", &multi_step_amount, 8, 100024);
-		ImGui::Image(my_tex_id, ImVec2(width * 1.25f, height * 1.25f));
+		ImGui::SameLine();
+
+		ImGui::PushItemWidth(ImGui::GetWindowWidth() * 0.25f);
+		ImGui::SliderInt("Step amount", &multi_step_amount, 8, 1024);
+
+		ImGui::Text("main_time: %d frame_count: %d", main_time, frame_count); ImGui::SameLine();
+		ImGui::Text("ms/frame: %.3f FPS: %.1f", 1000.0f / io.Framerate, io.Framerate);
+
+		ImGui::Image(my_tex_id, ImVec2(width* 2, height));
 		ImGui::End();
 #if 1
 		VSW1 = 0x54;
@@ -620,4 +646,4 @@ int main(int argc, char** argv, char** env) {
 	SDL_Quit();
 #endif
 	return 0;
-}
+	}
