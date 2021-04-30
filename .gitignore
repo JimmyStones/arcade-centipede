@@ -47,3 +47,4 @@ verilator_new/x86/*
 verilator_new/Debug/*
 verilator_new/Release/*
 verilator_new/obj_dir/*
+verilator_new/.vs/*

@@ -697,9 +697,9 @@ module centipede(
      if (reset)
        gry <= 0;
      else
-//       if (~mob_n)
-//	 gry <= 2'b00;
-//       else
+      if (~mob_n)
+	 gry <= 2'b00;
+      else
 	 gry <= mr;
 
    

@@ -17,6 +17,8 @@ module top(
    
    output VGA_HS,
    output VGA_VS,
+   output VGA_HB,
+   output VGA_VB,
    
    input        ioctl_download,
    input        ioctl_wr,
@@ -37,14 +39,15 @@ module top(
    assign vgaGreen = rgb[5:3];
    assign vgaRed   = rgb[2:0];
 
-   assign VGA_VS=~vsync; 
-   assign VGA_HS=~hsync; 
+   assign VGA_VS=vsync; 
+   assign VGA_HS=hsync; 
+   assign VGA_VB=vblank; 
+   assign VGA_HB=hblank; 
 
    wire [8:0] rgb;
    wire       csync, hsync, vsync, hblank, vblank;
    wire [7:0] audio;
    wire [3:0] led/*verilator public_flat*/;
-
    reg [7:0]  trakball/*verilator public_flat*/;
    reg [7:0]  joystick/*verilator public_flat*/;
    reg [7:0]  sw1/*verilator public_flat*/;
@@ -67,7 +70,7 @@ module top(
 		 .hblank_o(hblank),
 		 .vblank_o(vblank),
 		 .audio_o(audio),
-		.clk_6mhz_o()
+		 .clk_6mhz_o()
 		 );
    
 endmodule

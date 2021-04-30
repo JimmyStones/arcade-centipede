@@ -9,7 +9,7 @@
 module top(VGA_R,VGA_B,VGA_G,VGA_HS,VGA_VS,reset,clk_sys,clk_vid,ioctl_upload,ioctl_download,ioctl_addr,ioctl_dout,ioctl_din,ioctl_index,ioctl_wait,ioctl_wr);
 
    input clk_sys/*verilator public_flat*/;
-   input clk_vid/*verilator public_flat*/;
+   input clk_vid/*verilator public_flat*/
    input reset/*verilator public_flat*/;
 
    output [7:0] VGA_R/*verilator public_flat*/;

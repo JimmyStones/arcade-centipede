@@ -2,9 +2,9 @@
 #
 #
 
-#V = verilator
+V = verilator
 #V = /usr/local/bin/verilator
-V = /usr/local/src/verilator-3.876/bin/verilator
+#V = /usr/local/src/verilator-3.876/bin/verilator
 
 TOP = --top-module centipede_verilator
 RTL = ../rtl
