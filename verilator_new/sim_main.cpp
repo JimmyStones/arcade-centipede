@@ -1,3 +1,5 @@
+#pragma comment(lib, "dinput8.lib")
+#pragma comment(lib, "dxguid.lib")
 #include <iostream>
 #include <fstream>
 #include <sstream>
@@ -5,9 +7,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <math.h>
-
-//#include <atomic>
-//#include <fstream>
 
 #include <verilated.h>
 #include "Vtop.h"
@@ -63,36 +62,42 @@ static ID3D11DepthStencilState* g_pDepthStencilState = NULL;
 static int                      g_VertexBufferSize = 5000, g_IndexBufferSize = 10000;
 #endif
 
-/// 
-bool showDebugConsole = true;
-const char* windowTitle = "Virtual Dev Board v1.0";
+// GUI 
+const char* windowTitle = "Verilator Sim: Arcade-Centipede";
+bool showDebugWindow = true;
+const char* debugWindowTitle = "Virtual Dev Board v1.0";
+MemoryEditor memoryEditor_hs;
 
-// Instantiation of module.
-Vtop* top = NULL;
+// DirectInput
+#define DIRECTINPUT_VERSION 0x0800
+IDirectInput8* m_directInput;
+IDirectInputDevice8* m_keyboard;
+unsigned char m_keyboardState[256];
 
 // Video
 // -----
-//#define VGA_WIDTH 257
-//#define VGA_HEIGHT 240
-#define TEX_WIDTH 512
-#define TEX_HEIGHT 512
-#define VGA_WIDTH 512
-#define VGA_HEIGHT 512
+#define TEX_WIDTH 240
+#define TEX_HEIGHT 257
+#define VGA_WIDTH 257
+#define VGA_HEIGHT 240
 int pix_count = 0;
+int line_count = 0;
+int frame_count = 0;
+bool prev_hsync = 0;
+bool prev_vsync = 0;
+static int batchSize = 25000000 / 100;
+
+// Statistics
+// ----------
 SYSTEMTIME actualtime;
 LONG time_ms;
 LONG old_time = 0;
 LONG frame_time = 0;
 float fps = 0.0;
-static int batchSize = 25000000 / 100;
-unsigned char rgb[3];
-bool prev_vsync = 0;
-int frame_count = 0;
-bool prev_hsync = 0;
-int line_count = 0;
+int initialReset = 48;
 
 // Simulation control
-// -----------
+// ------------------
 bool run_enable = 1;
 bool single_step = 0;
 bool multi_step = 0;
@@ -101,16 +106,33 @@ int multi_step_amount = 1024;
 void ioctl_download_before_eval(void);
 void ioctl_download_after_eval(void);
 
-// Core inputs
-// -----------
+
+// Verilog module
+// --------------
+Vtop* top = NULL;
+
+// - Core inputs
 #define VSW1    top->top__DOT__sw1
 #define VSW2    top->top__DOT__sw2
 #define PLAYERINPUT top->top__DOT__playerinput
 #define JS      top->top__DOT__joystick
-void js_assert(int s) { JS &= ~(1 << s); }
-void js_deassert(int s) { JS |= 1 << s; }
-void playinput_assert(int s) { PLAYERINPUT &= ~(1 << s); }
-void playinput_deassert(int s) { PLAYERINPUT |= (1 << s); }
+
+const int input_right = 0;
+const int input_left = 1;
+const int input_down = 2;
+const int input_up = 3;
+const int input_fire1 = 4;
+const int input_start_1 = 5;
+const int input_start_2 = 6;
+const int input_coin_1 = 7;
+
+bool inputs[8];
+
+void js_assert(int s) { inputs[s] = 1; JS &= ~(1 << s); }
+void js_deassert(int s) { inputs[s] = 1;  JS |= 1 << s; }
+void input_assert(int s) { inputs[s] = 1;  PLAYERINPUT &= ~(1 << s); }
+void input_deassert(int s) { inputs[s] = 0; PLAYERINPUT |= (1 << s); }
+
 
 #ifdef WIN32
 // Data
@@ -136,8 +158,8 @@ HRESULT CreateDeviceD3D(HWND hWnd)
 	DXGI_SWAP_CHAIN_DESC sd;
 	ZeroMemory(&sd, sizeof(sd));
 	sd.BufferCount = 2;
-	sd.BufferDesc.Width = 0;
-	sd.BufferDesc.Height = 0;
+	sd.BufferDesc.Width = TEX_WIDTH;
+	sd.BufferDesc.Height = TEX_HEIGHT;
 	sd.BufferDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
 	sd.BufferDesc.RefreshRate.Numerator = 60;
 	sd.BufferDesc.RefreshRate.Denominator = 1;
@@ -150,7 +172,6 @@ HRESULT CreateDeviceD3D(HWND hWnd)
 	sd.SwapEffect = DXGI_SWAP_EFFECT_DISCARD;
 
 	UINT createDeviceFlags = 0;
-	//createDeviceFlags |= D3D11_CREATE_DEVICE_DEBUG;
 	D3D_FEATURE_LEVEL featureLevel;
 	const D3D_FEATURE_LEVEL featureLevelArray[2] = { D3D_FEATURE_LEVEL_11_0, D3D_FEATURE_LEVEL_10_0, };
 	if (D3D11CreateDeviceAndSwapChain(NULL, D3D_DRIVER_TYPE_HARDWARE, NULL, createDeviceFlags, featureLevelArray, 2, D3D11_SDK_VERSION, &sd, &g_pSwapChain, &g_pd3dDevice, &featureLevel, &g_pd3dDeviceContext) != S_OK)
@@ -201,24 +222,40 @@ double sc_time_stamp() {	// Called by $time in Verilog.
 	return main_time;
 }
 
-uint32_t* disp_ptr = NULL;
-uint32_t* vga_ptr = NULL;
-unsigned int disp_size = TEX_WIDTH * TEX_HEIGHT * 4;
-uint32_t vga_size = TEX_WIDTH * TEX_HEIGHT * 4;
+uint32_t* video_ptr = NULL;
+unsigned int video_size = TEX_WIDTH * TEX_HEIGHT * 4;
 
 DebugConsole console;
-//std::stringstream buffer;
-//std::streambuf* old = std::cerr.rdbuf(buffer.rdbuf());
 
-int initialReset = 48;
+int xMax = -100;
+int yMax = -100;
+int xMin = 1000;
+int yMin = 1000;
+
+// This is really not relevant, just a reminder
+int clockSpeed = 24;
+
+int clk_ratio_sys = 1;
+int clk_ratio_pix = 2;
+
+int clk_sys;
+int clk_div_sys;
+
+int clk_pix;
+int clk_pix_old;
+int clk_div_pix;
 
 
 void resetSimulation() {
 	main_time = 0;
-	top->clk_vid = 0;
-	top->clk_sys = 0;
 	top->reset = 1;
+	clk_div_sys = 0;
+	clk_sys = 0;
+	clk_div_pix = 0;
+	clk_pix = 0;
+	clk_pix_old = 0;
 }
+
 
 int verilate() {
 
@@ -229,43 +266,63 @@ int verilate() {
 		// Deassert reset after startup
 		if (main_time == initialReset) { top->reset = 0; }
 
-		top->clk_vid = !top->clk_vid;
-		top->clk_sys = !top->clk_sys;
+		// Clock dividers
+		clk_div_sys++;
+		if (clk_div_sys >= clk_ratio_sys) { clk_sys = !clk_sys; clk_div_sys = 0; }
+		clk_div_pix++;
+		if (clk_div_pix >= clk_ratio_pix) { clk_pix = !clk_pix;	clk_div_pix = 0; }
 
-		if (top->clk_vid == 1) {
+		// Set system clock in core
+		top->clk_12 = clk_sys;
 
+		// Rising edge of pixel clock
+		if (clk_pix == 1 && clk_pix_old == 0) {
+
+			// TODO: Fix hardcoded offsets
+			//int yo = -63;
+			int yo = -95;
+			int xo = -14;
+
+			// Rotated output by 90 degrees, flipped vertically!
+			int y = TEX_HEIGHT - (pix_count + yo);
+			int xs = TEX_WIDTH;
+			int x = line_count + xo;
+
+			// Clamp values to stop access violations on texture
+			if (x < 0) { x = 0; }
+			if (x > TEX_WIDTH - 1) { x = TEX_WIDTH - 1; }
+			if (y < 0) { y = 0; }
+			if (y > TEX_HEIGHT - 1) { y = TEX_HEIGHT - 1; }
+
+			// Only draw to texture if outside either hblank or vblank
 			bool draw = (!(top->VGA_HB || top->VGA_VB));
 			if (draw) {
-				rgb[0] = top->VGA_B;
-				rgb[1] = top->VGA_G;
-				rgb[2] = top->VGA_R;
-
-//				int yo = - 
-				//yo += (TEX_HEIGHT - VGA_HEIGHT);
-
-				int yo = -192;
-
-				int y = TEX_HEIGHT - (pix_count + yo);
-				int xs = TEX_WIDTH;
-				int x = line_count -5;
-				if (x < 0) { x = 0; }
-				if (x > TEX_WIDTH - 1) { x = TEX_WIDTH - 1; }
-				if (y < 0) { y = 0; }
-				if (y > TEX_HEIGHT - 1) { y = TEX_HEIGHT - 1; }
-
+				// Set colour to core output
+				uint32_t colour = 0xFF000000 | top->VGA_B << 16 | top->VGA_G << 8 | top->VGA_R;
+				// Generate texture address
 				uint32_t vga_addr = (y * xs) + x;
-				disp_ptr[vga_addr] = 0xFF000000 | rgb[0] << 16 | rgb[1] << 8 | rgb[2];	// Our debugger framebuffer is in the 32-bit RGBA format.
+				// Write pixel to texture
+				video_ptr[vga_addr] = colour;	// Our debugger framebuffer is in the 32-bit RGBA format.
 			}
 
+			// Track bounds (debug)
+			if (x > xMax) { xMax = x; }
+			if (y > yMax) { yMax = y; }
+			if (x < xMin) { xMin = x; }
+			if (y < yMin) { yMin = y; }
+
+			// Increment pixel counter
 			pix_count++;
 
+			// Rising edge of hsync
 			if (!prev_hsync && top->VGA_HS) {
-				//console.AddLog("HSYNC pixel: %d line: %d", pix_count, line_count);
+				// Increment line and reset pixel count
 				line_count++;
 				pix_count = 0;
 			}
 			prev_hsync = top->VGA_HS;
 
+			// Rising edge of vsync
 			if (!prev_vsync && top->VGA_VS) {
 				//console.AddLog("VSYNC pixel: %d line: %d", pix_count, line_count);
 				frame_count++;
@@ -280,20 +337,19 @@ int verilate() {
 			}
 			prev_vsync = top->VGA_VS;
 		}
+		clk_pix_old = clk_pix;
 
-		if (top->clk_sys) { ioctl_download_before_eval(); }
-		/*else if (ioctl_file)
-			console.AddLog("skipping download this cycle %d\n",top->clk_sys);*/
+		if (clk_div_sys == 0) {
+			if (clk_sys) { ioctl_download_before_eval(); }
+			top->eval();  // Only evaluate verilog on change of the system clock
+			if (clk_sys) { ioctl_download_after_eval(); }
+		}
 
-		top->eval();            // Evaluate model!
-
-		if (top->clk_sys) { ioctl_download_after_eval(); }
-
-		main_time++;            // Time passes...
+		main_time++;
 
 		return 1;
 	}
-	// Stop Verilating...
+	// Stop verilating and cleanup
 	top->final();
 	delete top;
 	exit(0);
@@ -314,7 +370,7 @@ int nextchar = 0;
 void ioctl_download_before_eval()
 {
 	if (ioctl_file) {
-		console.AddLog("ioctl_download_before_eval %x\n",top->ioctl_addr);
+		console.AddLog("ioctl_download_before_eval %x\n", top->ioctl_addr);
 		if (top->ioctl_wait == 0) {
 			top->ioctl_download = 1;
 			top->ioctl_wr = 1;
@@ -329,7 +385,7 @@ void ioctl_download_before_eval()
 				int curchar = fgetc(ioctl_file);
 				if (feof(ioctl_file) == 0) {
 					nextchar = curchar;
-					console.AddLog("ioctl_download_before_eval: dout %x \n",top->ioctl_dout);
+					console.AddLog("ioctl_download_before_eval: dout %x \n", top->ioctl_dout);
 					ioctl_next_addr++;
 				}
 			}
@@ -354,19 +410,51 @@ void ioctl_download_after_eval()
 //	ioctl_download_setfile("..\\Image Examples\\bird.bin", 0);
 //}
 
+bool ReadKeyboard()
+{
+	HRESULT result;
+
+	// Read the keyboard device.
+	result = m_keyboard->GetDeviceState(sizeof(m_keyboardState), (LPVOID)&m_keyboardState);
+	if (FAILED(result))
+	{
+		// If the keyboard lost focus or was not acquired then try to get control back.
+		if ((result == DIERR_INPUTLOST) || (result == DIERR_NOTACQUIRED)) { m_keyboard->Acquire(); }
+		else { return false; }
+	}
+	return true;
+}
+
 int main(int argc, char** argv, char** env) {
 
+	m_directInput = 0;
+	m_keyboard = 0;
+	HRESULT result;
 
+	// Initialize the main direct input interface.
+	result = DirectInput8Create(GetModuleHandle(nullptr), DIRECTINPUT_VERSION, IID_IDirectInput8, (void**)&m_directInput, NULL);
+	if (FAILED(result)) { return false; }
+	// Initialize the direct input interface for the keyboard.
+	result = m_directInput->CreateDevice(GUID_SysKeyboard, &m_keyboard, NULL);
+	if (FAILED(result)) { return false; }
+	// Set the data format.  In this case since it is a keyboard we can use the predefined data format.
+	result = m_keyboard->SetDataFormat(&c_dfDIKeyboard);
+	if (FAILED(result)) { return false; }
+	// Now acquire the keyboard.
+	result = m_keyboard->Acquire();
+	if (FAILED(result)) { return false; }
+
+	// Attach debug console to the verilated code
 	Verilated::setDebug(console);
 
-	disp_ptr = (uint32_t*)malloc(disp_size);
-	vga_ptr = (uint32_t*)malloc(vga_size);
+	// Setup pointers for video texture
+	video_ptr = (uint32_t*)malloc(video_size);
 
 #ifdef WIN32
 	// Create application window
 	WNDCLASSEX wc = { sizeof(WNDCLASSEX), CS_CLASSDC, WndProc, 0L, 0L, GetModuleHandle(NULL), NULL, NULL, NULL, NULL, _T("ImGui Example"), NULL };
 	RegisterClassEx(&wc);
-	HWND hwnd = CreateWindow(wc.lpszClassName, _T("Dear ImGui DirectX11 Example"), WS_OVERLAPPEDWINDOW, 100, 100, 1600, 1100, NULL, NULL, wc.hInstance, NULL);
+	HWND hwnd = CreateWindow(wc.lpszClassName, _T(windowTitle), WS_OVERLAPPEDWINDOW, 100, 100, 1600, 1100, NULL, NULL, wc.hInstance, NULL);
 
 	// Initialize Direct3D
 	if (CreateDeviceD3D(hwnd) < 0)
@@ -402,6 +490,13 @@ int main(int argc, char** argv, char** env) {
 #endif
 
 	top = new Vtop();
+	// Set core initial inputs
+#if 1
+	VSW1 = 0x54;
+	VSW2 = 0x0;
+	PLAYERINPUT = 0x3df;
+	JS = 0x0;
+#endif
 
 	// Setup Dear ImGui context
 	IMGUI_CHECKVERSION();
@@ -425,8 +520,7 @@ int main(int argc, char** argv, char** env) {
 
 	Verilated::commandArgs(argc, argv);
 
-	memset(disp_ptr, 0xAA, disp_size);
-	memset(vga_ptr, 0xAA, vga_size);
+	memset(video_ptr, 0xAA, video_size);
 
 	// Our state
 	ImVec4 clear_color = ImVec4(0.25f, 0.35f, 0.40f, 0.80f);
@@ -451,7 +545,7 @@ int main(int argc, char** argv, char** env) {
 
 	ID3D11Texture2D* pTexture = NULL;
 	D3D11_SUBRESOURCE_DATA subResource;
-	subResource.pSysMem = disp_ptr;
+	subResource.pSysMem = video_ptr;
 	subResource.SysMemPitch = desc.Width * 4;
 	subResource.SysMemSlicePitch = 0;
 	g_pd3dDevice->CreateTexture2D(&desc, &subResource, &pTexture);
@@ -543,23 +637,11 @@ int main(int argc, char** argv, char** env) {
 
 		ImGui::NewFrame();
 
-		console.Draw("Debug Log", &showDebugConsole);
+		console.Draw("Debug Log", &showDebugWindow);
 
-		//bool more = true;
-		//while (more)
-		//{
-		//	//std::string text = buffer.str();
-		//	if (text.length() > 0) {
-		//		console.AddLog(text.c_str());
-		//	}
-		//	else {
-		//		more = false;
-		//	}
-		//}
-
-		ImGui::Begin(windowTitle);
-		ImGui::SetWindowPos(windowTitle, ImVec2(600, 40), ImGuiCond_Once);
-		ImGui::SetWindowSize(windowTitle, ImVec2(900, 900), ImGuiCond_Once);
+		ImGui::Begin(debugWindowTitle);
+		ImGui::SetWindowPos(debugWindowTitle, ImVec2(600, 40), ImGuiCond_Once);
+		ImGui::SetWindowSize(debugWindowTitle, ImVec2(900, 900), ImGuiCond_Once);
 
 		if (ImGui::Button("RESET")) { resetSimulation(); } ImGui::SameLine();
 		if (ImGui::Button("START")) { run_enable = 1; } ImGui::SameLine();
@@ -579,22 +661,32 @@ int main(int argc, char** argv, char** env) {
 
 		ImGui::Text("main_time: %d frame_count: %d", main_time, frame_count); ImGui::SameLine();
 		ImGui::Text("ms/frame: %.3f FPS: %.1f", 1000.0f / io.Framerate, io.Framerate);
+		ImGui::Text("xMax: %d  yMax: %d", xMax, yMax);
+		ImGui::Text("xMin: %d  yMin: %d", xMin, yMin);
 
-		ImGui::Image(my_tex_id, ImVec2(width* 2, height));
+		ImGui::Text("up: %x", PLAYERINPUT[&input_up]); ImGui::SameLine();
+		ImGui::Text("down: %x", PLAYERINPUT[&input_down]); ImGui::SameLine();
+		ImGui::Text("left: %x", PLAYERINPUT[&input_left]); ImGui::SameLine();
+		ImGui::Text("right: %x", PLAYERINPUT[&input_right]);
+
+		ImGui::Text("start 1: %x", PLAYERINPUT[&input_start_1]); ImGui::SameLine();
+		ImGui::Text("coin 1: %x", PLAYERINPUT[&input_coin_1]);
+
+
+		float m = 2.5;
+		ImGui::Image(my_tex_id, ImVec2(width * m, height * m));
 		ImGui::End();
-#if 1
-		VSW1 = 0x54;
-		VSW2 = 0x0;
-		PLAYERINPUT = 0x3df;
-		JS = 0x0;
-#endif
+
+		ImGui::Begin("RAM Editor");
+		memoryEditor_hs.DrawContents(top->top__DOT__uut__DOT__hs_ram__DOT__mem, 64, 0);
+		ImGui::End();
 
 #ifdef WIN32
 		// Update the texture!
 		// D3D11_USAGE_DEFAULT MUST be set in the texture description (somewhere above) for this to work.
 		// (D3D11_USAGE_DYNAMIC is for use with map / unmap.) ElectronAsh.
 
-		g_pd3dDeviceContext->UpdateSubresource(pTexture, 0, NULL, disp_ptr, width * 4, 0);
+		g_pd3dDeviceContext->UpdateSubresource(pTexture, 0, NULL, video_ptr, width * 4, 0);
 
 		// Rendering
 		ImGui::Render();
@@ -616,6 +708,59 @@ int main(int argc, char** argv, char** env) {
 		SDL_GL_SwapWindow(window);
 #endif
 
+
+		// Player inputs
+		// -------------
+		// Read the current state of the keyboard.
+		bool pr = ReadKeyboard();
+
+		inputs[input_up] = m_keyboardState[DIK_UP] & 0x80;
+		inputs[input_right] = m_keyboardState[DIK_RIGHT] & 0x80;
+		inputs[input_down] = m_keyboardState[DIK_DOWN] & 0x80;
+		inputs[input_left] = m_keyboardState[DIK_LEFT] & 0x80;
+
+		inputs[input_fire1] = m_keyboardState[DIK_SPACE] & 0x80;
+		inputs[input_start_1] = m_keyboardState[DIK_1] & 0x80;
+		inputs[input_coin_1] = m_keyboardState[DIK_5] & 0x80;
+
+		PLAYERINPUT = PLAYERINPUT &= (1 >> input_fire1);
+		PLAYERINPUT = PLAYERINPUT &= (1 >> input_fire1);
+		PLAYERINPUT = PLAYERINPUT &= (1 >> input_fire1);
+
+		//= { 1'b1, 1'b1, ~(m_coin), m_test, status[12], m_slam, ~(m_start2), ~(m_start1), ~m_fire_2, ~m_fire };
+		//assign joystick_i = { ~m_right,~m_left,~m_down,~m_up, ~m_right_2,~m_left_2,~m_down_2,~m_up_2 };
+
+
+
+		//if (ImGui::IsKeyPressed(SDL_SCANCODE_SPACE)) {
+		//	playinput_assert(0);
+		//}
+		//else {
+		//	
+		//}
+		//if (ImGui::IsKeyPressed(SDL_SCANCODE_LEFT)) {
+		//	js_assert(6);
+		//}
+		//else {
+		//	js_deassert(6);
+		//}
+		//if (ImGui::IsKeyPressed(SDL_SCANCODE_RIGHT)) {
+		//	js_assert(7);
+		//}
+		//else {
+		//	js_deassert(7);
+		//}
+		//if (ImGui::IsKeyPressed(SDL_SCANCODE_5)) {
+		//	playinput_assert(7);
+		//}
+		//else
+		//	playinput_deassert(7);
+		//if (ImGui::IsKeyPressed(SDL_SCANCODE_1))
+		//	playinput_assert(3);
+		//else
+		//	playinput_deassert(3);
+
+
 		if (run_enable) {
 			for (int step = 0; step < batchSize; step++) { verilate(); }
 		}
@@ -626,6 +771,10 @@ int main(int argc, char** argv, char** env) {
 			}
 		}
 	}
+
+	// Clean up before exit
+	// --------------------
+
 #ifdef WIN32
 	// Close imgui stuff properly...
 	ImGui_ImplDX11_Shutdown();
@@ -645,5 +794,11 @@ int main(int argc, char** argv, char** env) {
 	SDL_DestroyWindow(window);
 	SDL_Quit();
 #endif
+
+	// Release keyboard
+	if (m_keyboard) { m_keyboard->Unacquire(); m_keyboard->Release(); m_keyboard = 0; }
+	// Release direct input
+	if (m_directInput) { m_directInput->Release(); m_directInput = 0; }
+
 	return 0;
 	}

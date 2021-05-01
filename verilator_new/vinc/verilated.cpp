@@ -1284,7 +1284,7 @@ std::string VL_SFORMATF_NX(const char* formatp, ...) VL_MT_SAFE {
 
 	return output;
 }
-
+static DebugConsole console;
 void VL_WRITEF(const char* formatp, ...) VL_MT_SAFE {
 	static VL_THREAD_LOCAL std::string output;  // static only for speed
 	output = "";
@@ -1293,11 +1293,9 @@ void VL_WRITEF(const char* formatp, ...) VL_MT_SAFE {
 	_vl_vsformat(output, formatp, ap);
 	va_end(ap);
 
-	VL_PRINTF_MT("%s", output.c_str());
+	console.AddLog(output.c_str());
+	//VL_PRINTF_MT("%s", output.c_str());
 }
-
-static DebugConsole console;
-
 
 void VL_FWRITEF(IData fpi, const char* formatp, ...) VL_MT_SAFE {
 	
@@ -1312,8 +1310,7 @@ void VL_FWRITEF(IData fpi, const char* formatp, ...) VL_MT_SAFE {
 	_vl_vsformat(output, formatp, ap);
 	va_end(ap);
 
-	console.AddLog(output.c_str());
-	//fputs(output.c_str(), fp);
+	fputs(output.c_str(), fp);
 }
 
 IData VL_FSCANF_IX(IData fpi, const char* formatp, ...) VL_MT_SAFE {

@@ -21,8 +21,10 @@ module hs_ram(
    integer    j;
    initial
      begin
-	for (j = 0; j < 64; j = j + 1)
-	  `include "../roms/extract/earom_code.v";
+		for (j = 0; j < 64; j = j + 1)
+		begin
+	  		`include "../roms/extract/earom_code.v";
+		end
      end
 `endif
 
@@ -32,12 +34,12 @@ module hs_ram(
 	 begin
 		 if(c1==1'b0 && c2==1'b0)
 		 begin
-		 	$fdisplay(STDERR,"hs_write");
+		 	$display("hs_write");
 			mem[a] <= din;
 		 end 
 		 if(c1==1'b0 && c2==1'b1)
 		 begin
-		 	$fdisplay(STDERR,"hs_erase");
+		 	$display("hs_erase");
 			mem[a] <= 8'h00;
 		 end
 	 end 
@@ -48,7 +50,7 @@ module hs_ram(
 	   if(cs1 == 1'b1 && c1 == 1'b1 && c2 == 1'b0)
 	   begin
 	   	d <= mem[a];
-		$fdisplay(STDERR,"hs_read %b > %b", a, mem[a]);
+		$display("hs_read %b > %b", a, mem[a]);
 	   end
    end
 

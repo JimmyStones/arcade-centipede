@@ -7,8 +7,7 @@
 
 module top(
 
-   input clk_sys/*verilator public_flat*/,
-   input clk_vid/*verilator public_flat*/,
+   input clk_12 /*verilator public_flat*/,
    input reset/*verilator public_flat*/,
 
    output [7:0] VGA_R/*verilator public_flat*/,
@@ -55,7 +54,7 @@ module top(
    reg [9:0]  playerinput/*verilator public_flat*/;
 
     centipede uut(
-		 .clk_12mhz(clk_sys),
+		 .clk_12mhz(clk_12),
  		 .reset(reset),
 		 .playerinput_i(playerinput),
 		 .trakball_i(trakball),
@@ -70,7 +69,17 @@ module top(
 		 .hblank_o(hblank),
 		 .vblank_o(vblank),
 		 .audio_o(audio),
-		 .clk_6mhz_o()
-		 );
+		 .clk_6mhz_o(),
+       .flip_o(),
+       .pause(1'b0),
+       .dn_addr(16'b0),
+       .dn_data(8'b0),
+       .dn_wr(1'b0),
+       .hs_address(7'b0),
+		 .hs_data_in(8'b0),
+		 .hs_data_out(),
+		 .hs_write(1'b0),
+		 .hs_access(1'b0)
+       );
    
 endmodule

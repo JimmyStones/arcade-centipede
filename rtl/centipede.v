@@ -15,48 +15,49 @@
 // do some debugging of the pokey code I was using.
 //
 
-`define no_colormap
-`define async_lr
-//`define force_pf
-
-//`define debug
-//`define debug_irq
-//`define debug_vblank
-//`define debug_ram
-//`define debug_match
-//`define debug_input
-//`define debug_pf_wr
 	
 module centipede(
-		 input 	      clk_12mhz,
- 		 input 	      reset,
-		 input [9:0]  playerinput_i,
-		 input [7:0]  trakball_i,
-		 input [7:0]  joystick_i,
-		 input [7:0]  sw1_i,
-		 input [7:0]  sw2_i,
-		 output [4:1] led_o,
-		 output [8:0] rgb_o,
-		 output       sync_o,
-		 output       hsync_o,
-		 output       vsync_o,
-		 output       hblank_o,
-		 output       vblank_o,
-		 output [7:0] audio_o,
-		 output	      clk_6mhz_o
+		 input         clk_12mhz,
+ 		 input         reset,
+		 input         pause,
+		 input [9:0]   playerinput_i,
+		 input [7:0]   trakball_i,
+		 output        flip_o,
+		 input [7:0]   joystick_i,
+		 input [7:0]   sw1_i,
+		 input [7:0]   sw2_i,
+		 input  [15:0] dn_addr,
+		 input  [7:0]  dn_data,
+		 input         dn_wr,
+		 output [4:1]  led_o,
+		 output [8:0]  rgb_o,
+		 output        sync_o,
+		 output        hsync_o,
+		 output        vsync_o,
+		 output        hblank_o,
+		 output        vblank_o,
+		 output [7:0]  audio_o,
+		 output        clk_6mhz_o,
+
+		 // Hiscore
+
+		 input	 [6:0]	hs_address,
+		 input	 [7:0]	hs_data_in,
+		 output	 [7:0]	hs_data_out,
+		 input				hs_write,
+		 input				hs_access
 		 );
 
    integer STDERR = 32'h8000_0002;
-   
    //
    wire s_12mhz, s_12mhz_n;
    wire s_6mhz, s_6mhz_n;
 
    wire phi0, phi2;
-   reg 	phi0a;
+   reg 	phi0a, phi0a_temp;
 
    //
-   wire rom_n, rom3_n, rom2_n, rom1_n, rom0_n;
+   wire rom_n;
    wire ram0_n;
    wire steerclr_n, watchdog_n, out0_n, irqres_n;
    wire pokey_n, swrd_n, pf_n;
@@ -110,7 +111,6 @@ module centipede(
    
    wire       pload_n;
    wire       write_n;
-   wire       write2_n;
    wire       brw_n;
    
    wire [15:0] pdf;
@@ -140,11 +140,7 @@ module centipede(
 
    reg [1:0]   gry;
    wire [1:0]  y;
-`ifdef async_lr
-   wire [1:0]  mr;
-`else
-   reg [1:0]  mr;
-`endif
+   reg [1:0]   mr;
    
    wire [7:0]  line_ram_addr;
    reg [1:0]   line_ram[0:255];
@@ -175,7 +171,6 @@ module centipede(
    wire        hs_set;
 
    wire        hs_addr_clk;
-   wire        hs_ctrl_clk;
 
    //
    wire        comp_sync;
@@ -183,7 +178,7 @@ module centipede(
    wire [3:0]  coloram_out;
    wire [3:0]  coloram_rgbi;
    wire        coloram_w_n;
-   reg 	       coloren;
+   reg 	       coloren, coloren_temp;
 
    wire [1:0]  rama_sel;
    wire [1:0]  rama_hi;
@@ -208,26 +203,28 @@ module centipede(
    wire [7:0]  playerin_out;
 
    wire [7:0]  pokey_out;
-   
+   wire [3:0] pokey_ch0, pokey_ch1, pokey_ch2, pokey_ch3; 
+ 
    // ------------------------------------------------------------------------
 
+	// Hiscore mux
+	wire			hs_cs_ram = hs_address[6] == 1'b0;
+	wire			hs_cs_earom = hs_address[6] == 1'b1;
+	wire [7:0]	hs_data_out_ram;
+	wire [7:0]	hs_data_out_earom;
+	assign		hs_data_out = hs_cs_ram ? hs_data_out_ram : hs_data_out_earom;
+
    // Synchronizer
-   /* verilator lint_off UNOPTFLAT */
    reg [11:0]  h_counter;
    reg [7:0]   v_counter;
-   /* verilator lint_on UNOPTFLAT */
    wire        v_counter_reset;
-
-//   initial
-//     h_counter = 0;
-
-   
+  
    always @(posedge s_12mhz or posedge reset)
      if (reset)
-       h_counter <= 0;
+       h_counter <= 12'b1101_0000_0000;
      else
        if (h_counter == 12'hfff)
-	 h_counter <= 12'b110100000000;
+	 h_counter <= 12'b1101_0000_0000;
        else
 	 h_counter <= h_counter + 12'd1;
 
@@ -317,9 +314,15 @@ module centipede(
    //
    always @(posedge s_6mhz)
      if (reset)
+       coloren_temp <= 0;
+     else
+       coloren_temp <= s_256hd;
+
+	always @(negedge s_6mhz)
+     if (reset)
        coloren <= 0;
      else
-       coloren <= s_256hd;
+       coloren <= coloren_temp;
 
    assign s_6_12 = ~(s_6mhz & s_12mhz);
 
@@ -353,7 +356,7 @@ module centipede(
 `ifdef debug_ram
    always @(posedge s_6mhz)
      if (~ram0_n & ~write_n)
-       $fdisplay(STDERR,"ram: %x <- %x", ab[9:0], db_out);
+       $display("ram: %x <- %x", ab[9:0], db_out);
 `endif
 //
    
@@ -364,44 +367,30 @@ module centipede(
      if (~irqres_n)
        irq <= 1'b1;
      else
-//       irq <= s_32v;
        irq <= ~s_32v;
 
-//   assign irq_n = ~irq;
    assign irq_n = irq;
    
-`ifdef debug_irq
-   //---
-   always @(negedge irq) $fdisplay(STDERR,"irq: assert");
-   always @(posedge irq) $fdisplay(STDERR,"irq: deassert");
-   //---
-`endif
    
-//`define orig_phi0
-`ifdef orig_phi0
    always @(posedge s_1h)
      if (reset)
-       phi0a <= 1'b0;
+       phi0a_temp <= 1'b0;
      else
        case ({(pf_n | s_4h), s_2h})
-	 2'b00: phi0a <= phi0a;
-	 2'b01: phi0a <= 1'b0;
-	 2'b10: phi0a <= 1'b1;
-	 2'b11: phi0a <= ~phi0a;
+	 2'b00: phi0a_temp <= phi0a_temp;
+	 2'b01: phi0a_temp <= 1'b0;
+	 2'b10: phi0a_temp <= 1'b1;
+	 2'b11: phi0a_temp <= ~phi0a_temp;
        endcase
+
+	always @(negedge s_1h)
+		if (reset)
+			phi0a <= 1'b0;
+		else
+			phi0a <= phi0a_temp;
    
    assign phi0 = ~phi0a;
-   assign pac_n = ~phi0a;
-`else
-   always @(posedge s_1h or posedge reset)
-     if (reset)
-       phi0a <= 1'b0;
-     else
-       phi0a <= ~phi0a;
 
-   assign phi0 = ~phi0a;
-   assign pac_n = ~phi0a;
-`endif
 
    // watchdog?
    always @(posedge s_12mhz)
@@ -412,7 +401,6 @@ module centipede(
        end
      else
        begin
-//	  if (mpu_reset_cntr != 8'hff)
 	  if (mpu_reset_cntr != 8'h10)
 	    mpu_reset_cntr <= mpu_reset_cntr + 8'd1;
 	  else
@@ -436,6 +424,7 @@ module centipede(
 	       .din(db_in[7:0]),
 	       .dout(db_out[7:0])
 	       );
+	assign phi2 = ~phi0;
 
    // Address Decoder
    assign write_n = ~(phi2 & ~rw_n);
@@ -449,13 +438,6 @@ module centipede(
    //
    //   0010 xxxx xxxx xxxx  2000 rom_n
    //   0000 1100 0000 0000  0c00 
-   
-   assign {rom3_n, rom2_n, rom1_n, rom0_n} =
-					    ({rom_n, ab[12:11]} == 3'b000) ? 4'b1110 :
-					    ({rom_n, ab[12:11]} == 3'b001) ? 4'b1101 :
-					    ({rom_n, ab[12:11]} == 3'b010) ? 4'b1011 :
-					    ({rom_n, ab[12:11]} == 3'b011) ? 4'b0111 :
-					    4'b1111;
 
    assign adecode =
 		   (ab[13:10] == 4'b0000) ? 10'b1111111110 :
@@ -470,14 +452,21 @@ module centipede(
 		   (ab[13:10] == 4'b1001) ? 10'b0111111111 :
 		   10'b1111111111;
 
+  
+   reg write2_n;
    assign write2_n = ~(s_6mhz & ~write_n);
+  //  always @(posedge s_6mhz)
+  //    if (reset)
+  //      write2_n <= 0;
+  //    else
+  //      write2_n <= write_n;
    
    assign steerclr_n = adecode[9] | write2_n;
    assign watchdog_n = adecode[8] | write2_n;
    assign out0_n =     adecode[7] | write2_n;
    assign irqres_n =  (adecode[6] | write2_n) & mpu_reset_n;
 
-   assign coloram_n = (adecode[5] | ab[9])/* | pac_n*/;
+   assign coloram_n = (adecode[5] | ab[9]) /* | pac_n*/;
    
    assign pokey_n = adecode[4];
 
@@ -510,8 +499,7 @@ module centipede(
 						4'b1111;
 
    //
-//   assign mob_n = ~(s_256h_n & s_256hd) & ~(s_256h2d_n & s_256hd);
-   assign mob_n = ~(s_256h_n | s_256h2d_n);
+   assign mob_n = ~(s_256h_n & s_256hd) & ~(s_256h2d_n & s_256hd);
 
    assign blank_clk = ~s_12mhz & (h_counter[3:0] == 4'b1111);
 
@@ -565,41 +553,28 @@ module centipede(
    assign match_sum = match_line + pfd[15:8];
    assign match_sum_top = ~(match_sum[7] & match_sum[6] & match_sum[5] & match_sum[4]);
 
-//   always @(posedge s_4h_n)
+//   always @(posedge s_4h)
 //     if (reset)
-//       match_sum_hold <= 0;
+//      match_sum_hold <= 0;
 //     else
 //       match_sum_hold <= { match_sum_top, 1'b0, match_sum[3:0] };
-   always @(posedge s_6mhz)
-     if (reset)
+
+   always @(negedge s_6mhz)
+    if (reset)
        match_sum_hold <= 0;
      else
-       if (s_4h)
+       if (h_counter[3:1] == 3'b011)	// clock enable rising edge of s_4h
        match_sum_hold <= { match_sum_top, 1'b0, match_sum[3:0] };
 
    assign match_mux = s_256h ? { pic[0], s_4v, s_2v, s_1v } : match_sum_hold[3:0];
 
    assign match_n = match_sum_hold[5] & s_256h_n;
 
-   // for debug only
-   assign match_true = (~match_n & s_256h_n) && pfd != 0;
-
    assign mga = { match_mux[3] ^ (pic[7] & s_256h_n),
 		  match_mux[2] ^ pic[7],
 		  match_mux[1] ^ pic[7],
 		  match_mux[0] ^ pic[7] };
    
-//---
-//`define debug_match
-`ifdef debug_match
-   always @(posedge s_6mhz)
-     if (hblank & ~match_n && pfa != 0 && pfd_hold != 0)
-       $fdisplay(STDERR,"mo: match pfa %x pfd %x mga %x line %x hpos %x (%x)",
-		pfa, pfd, mga,
-		{s_128v, s_64v, s_32v, s_16v, s_8v, s_4v, s_2v, s_1v},
-		pfd_hold[23:16], pfd_hold);
-`endif
-//---
    
    // motion objects (horizontal)
 
@@ -615,12 +590,13 @@ module centipede(
 //       pfd_hold <= 0;
 //     else
 //       pfd_hold <= pfd[29:16];
-    always @(posedge s_6mhz)
-     if (reset)
+
+    always @(negedge s_6mhz)
+    if (reset)
        pfd_hold <= 0;
      else
        /* posedge s_4h */
-       if (~s_4h)
+       if (h_counter[3:1] == 3'b011)	// clock enable rising edge of s_4h
 	 pfd_hold <= pfd[29:16];
 
 //   always @(posedge s_4h_n)
@@ -628,12 +604,13 @@ module centipede(
 //       pfd_hold2 <= 0;
 //     else
 //       pfd_hold2 <= pfd_hold;
-   always @(posedge s_6mhz)
+
+   always @(negedge s_6mhz)
      if (reset)
        pfd_hold2 <= 0;
      else
        /* posedge s_4h_n */
-       if (s_1h & s_2h & s_4h)
+       if (h_counter[3:1] == 3'b000)	// clock enable rising edge os s_4h_n
 	   pfd_hold2 <= pfd_hold;
    
    assign y[1] =
@@ -662,14 +639,7 @@ module centipede(
 	    line_ram_ctr <= 0;
 	  else
 	    if (line_ram_ctr_load) 
-`ifdef debug_match
-	      begin
-		 line_ram_ctr <= pfd_hold[23:16];
-		 $fdisplay(STDERR,"line ram ctr <= %x", pfd_hold[23:16]);
-	      end
-`else
 	      line_ram_ctr <= pfd_hold[23:16];
-`endif
 	    else
 	      line_ram_ctr <= line_ram_ctr + 8'b1;
        end
@@ -677,32 +647,21 @@ module centipede(
    assign line_ram_addr = line_ram_ctr;
 
    always @(posedge s_6mhz)
-`ifdef debug
-     if (^line_ram_addr === 1'bX)
-       ;
-     else
-       line_ram[line_ram_addr] <= y;
-`else
      line_ram[line_ram_addr] <= y;
-`endif
 
-`ifdef async_lr
-   assign mr = line_ram[line_ram_addr];
-`else
    always @(posedge s_12mhz)
      if (reset)
        mr <= 0;
      else
        mr <= line_ram[line_ram_addr];
-`endif
    
    always @(posedge s_6mhz_n)
      if (reset)
        gry <= 0;
      else
-      if (~mob_n)
+       if (~mob_n)
 	 gry <= 2'b00;
-      else
+       else
 	 gry <= mr;
 
    
@@ -725,11 +684,12 @@ module centipede(
 //       pic <= 0;
 //     else
 //       pic <= pf[7:0];
-   always @(posedge s_6mhz)
+
+   always @(negedge s_6mhz)
      if (reset)
        pic <= 0;
      else
-       if (~s_4h)
+      if (h_counter[3:1] == 3'b011)		// clock enable rising edge of s_4h
 	 pic <= pf[7:0];
    
    pf_rom1 pf_rom1(
@@ -751,16 +711,8 @@ module centipede(
    wire pf_romx_haddr;
    assign pf_romx_haddr = s_256h_n & pic[0];
 
-`ifdef force_pf  // debug
-   wire [7:0] ca;
-   assign ca = {s_16h, s_8h, s_128v, s_64v, s_32v, s_16v, s_8v};
-
-   assign pf_rom0_addr = { ca[7:1], { ca[0], s_4v, s_2v, s_1v} };
-   assign pf_rom1_addr = pf_rom0_addr;
-`else
    assign pf_rom1_addr = { pf_romx_haddr, s_256h, pic[5:1], mga };
    assign pf_rom0_addr = { pf_romx_haddr, s_256h, pic[5:1], mga };
-`endif
 
    assign pf_rom0_out_rev = { pf_rom0_out[0], pf_rom0_out[1], pf_rom0_out[2], pf_rom0_out[3],
 			      pf_rom0_out[4], pf_rom0_out[5], pf_rom0_out[6], pf_rom0_out[7] };
@@ -799,8 +751,7 @@ module centipede(
    assign db_in =
 		 ~rom_n ? rom_out :
 		 ~ram0_n ? ram_out :
-		 ~coloram_n ? { 4'b0, coloram_out } :
-                 ~pframrd_n ? pf_out[7:0] :
+         ~pframrd_n ? pf_out[7:0] :
 		 ~ea_read_n ? hs_out :
 		 ~in0_n ? playerin_out :
 		 ~in1_n ? joystick_out :
@@ -808,22 +759,7 @@ module centipede(
 		 ~pokey_n ? pokey_out :
 		 8'b0;
 
-`ifdef debug_input
-   //---
-   always @(posedge s_6mhz)
-     begin
-	if (~in0_n && ab[0] == 0) $fdisplay(STDERR,"playerin: read%x %x", ab[0], playerin_out);
-	if (~in1_n) $fdisplay(STDERR,"joystick: read%x %x", ab[0], joystick_out);   
-	if (~swrd_n) $fdisplay(STDERR,"switch: read%x %x", ab[0], switch_out);
-	if (~irqres_n & mpu_reset_n) $fdisplay(STDERR,"irq: ack");
-	if (~pokey_n & 0) $fdisplay(STDERR,"pokey: read %x -> %x", ab[3:0], pokey_out);
-	if (~pframrd_n) $fdisplay(STDERR,"pf: %x -> %x (ab %x pfd %x)", pfa, pf[7:0], ab, pfd);
-     end
-   //---
-`endif
-
    // we ignore the cpu, as pf ram is now dp and cpu has it's own port
-//   assign pf_sel = mob_n ? { s_8v, s_128h } : 2'b00;
    assign pf_sel = pf_addr_stamp ? 2'b00 : { s_8v, s_128h };
    
    assign pf =
@@ -843,7 +779,7 @@ module centipede(
    // during horizontal blanking pfa4..7 are held high enabling the motion object
    // circuitry to access the playfield memory for the motion objects to be displayed
 
-   assign pf_addr_stamp = hblank & ~s_256h;
+   assign pf_addr_stamp = s_256h_n & s_4h_n;
 
    // force pf address to "stamp area" during hblank
    assign pfa7654 = pf_addr_stamp ? 4'b1111 : { s_128v, s_64v, s_32v, s_16v };
@@ -880,21 +816,6 @@ module centipede(
 		    .ce_b(pf_ce4_n)
 		    );
    
-//`define debug_pf_wr
-`ifdef debug_pf_wr
-   //
-   always @(pfwr3_n or pfwr2_n or pfwr1_n or pfwr0_n)
-     begin
-	if (~pfwr3_n)
-	  $fdisplay(STDERR,"pf: 3 %x <- %x", pfa, db_out[7:0]);
-	if (~pfwr2_n)
-	  $fdisplay(STDERR,"pf: 2 %x <- %x", pfa, db_out[7:0]);
-	if (~pfwr1_n)
-	  $fdisplay(STDERR,"pf: 1 %x <- %x", pfa, db_out[7:0]);
-	if (~pfwr0_n)
-	  $fdisplay(STDERR,"pf: 0 %x <- %x", pfa, db_out[7:0]);
-     end
-`endif
    
    // High Score Memory Circuitry
    assign hs_addr_clk = ea_addr_n | write2_n;
@@ -903,9 +824,9 @@ module centipede(
    always @(posedge hs_addr_clk)
    begin
      hs_addr <= ab[5:0];
-     $fdisplay(STDERR,"hs_addr %b",hs_addr);
+     $display("hs_addr %b",hs_addr);
      hs_data <= db_out[7:0];
-     //$fdisplay(STDERR,"hs_data %b",hs_data);
+     //$display("hs_data %b",hs_data);
    end
 
    reg hs_clk;
@@ -921,7 +842,7 @@ module centipede(
     hs_c2 <= hs_ctrl[2];
     hs_cs1 <= hs_ctrl[3];
     if (hs_cs1)
-      $fdisplay(STDERR,"hs_c2=%b hs_c1=%b hs_clk=%b", hs_c2, hs_c1, hs_clk);
+      $display("hs_c2=%b hs_c1=%b hs_clk=%b", hs_c2, hs_c1, hs_clk);
    end
 
    hs_ram hs_ram(
@@ -935,6 +856,8 @@ module centipede(
 		 .cs1(hs_cs1)
 
 		 );
+   always @(posedge hs_addr_clk)
+     hs_data <= db_out[7:0];
 
    // Joystick Circuitry
    wire js1_right, js1_left, js1_down, js1_up;
@@ -963,31 +886,25 @@ module centipede(
    wire coin_r, coin_c, coin_l, self_test;
    wire cocktail, slam, start1, start2, fire2, fire1;
 
-   assign coin_r = coin_ctr_r_drive ? coin_ctr_r_drive : playerinput_i[9];
-   assign coin_c = coin_ctr_c_drive ? coin_ctr_c_drive : playerinput_i[8];
-   assign coin_l = coin_ctr_l_drive ? coin_ctr_l_drive : playerinput_i[7];
+   assign coin_r = playerinput_i[9];
+   assign coin_c = playerinput_i[8];
+   assign coin_l = playerinput_i[7];
    assign self_test = playerinput_i[6];
    assign cocktail = playerinput_i[5];
    assign slam = playerinput_i[4];
-   assign start1 = playerinput_i[3];
-   assign start2 = playerinput_i[2];
+   assign start2 = playerinput_i[3];
+   assign start1 = playerinput_i[2];
    assign fire2 = playerinput_i[1];
    assign fire1 = playerinput_i[0];
 
-   wire [7:0] playerin_out0/*verilator public_flat_rd*/;
-   wire [7:0] playerin_out1/*verilator public_flat_rd*/;
+   wire [7:0] playerin_out0;
+   wire [7:0] playerin_out1;
    
-   assign playerin_out1 = { coin_r, coin_c, coin_l, slam, fire2, fire1, start1, start2 };
+   assign playerin_out1 = { coin_r, coin_c, coin_l, slam, fire2, fire1, start2, start1 };
    assign playerin_out0 = { dir1, vblank, self_test, cocktail, tra };
 
    assign playerin_out = ab[0] ? playerin_out1 : playerin_out0;
    
-`ifdef debug_vblank
-   always @(posedge vblank)
-     $fdisplay(STDERR,"vblank: on");
-   always @(negedge vblank)
-     $fdisplay(STDERR,"vblank: off");
-`endif
    
    // Coin Counter Output
    reg [7:0] cc_latch;
@@ -1006,12 +923,10 @@ module centipede(
    assign led_o[1] = cc_latch[3];
    assign coin_ctr_r_drive = cc_latch[2];
    assign coin_ctr_c_drive = cc_latch[1];
-   assign coin_ctr_l_drive = cc_latch[1];
+   assign coin_ctr_l_drive = cc_latch[0];
    
    // Mini-Trak Ball inputs
-/* verilator lint_off UNOPTFLAT */
    wire [3:0] tb_mux;
-/* verilator lint_on UNOPTFLAT */
    wire       s_1_horiz_dir, s_1_horiz_ck, s_1_vert_dir, s_1_vert_ck;
    wire       s_2_horiz_dir, s_2_horiz_ck, s_2_vert_dir, s_2_vert_ck;
    wire       tb_h_dir, tb_h_ck, tb_v_dir, tb_v_ck;
@@ -1077,9 +992,8 @@ module centipede(
    assign trb = tb_v_ctr;
    assign dir1 = tb_h_reg;
    assign dir2 = tb_v_reg;
-   
 
-   // Audio output circuitry
+   assign flip_o = flip;
 
    pokey pokey(.a(ab[3:0]),
 	       .cs0_n(1'b0),
@@ -1109,11 +1023,16 @@ module centipede(
    
    assign comp_sync = hsync_n & vsync_n;
 
+   wire blank_disp_n;
+   assign blank_disp_n = hblank_n & vblankd_n;
+
    // XXX implement alternate shades of blue and green...
    always @(posedge s_6mhz_n)
      if (reset)
-       rgbi <= 0;
-     else
+       rgbi <= 4'b1111;		// output is inverted
+	  else if (~blank_disp_n)
+	    rgbi <= 4'b1111;
+      else
        rgbi <= coloram_rgbi;
 
    assign coloram_w_n = write_n | coloram_n;
@@ -1146,55 +1065,25 @@ module centipede(
 		       .dout_b(coloram_rgbi));
 
    // output to the top level
-`ifdef no_colormap
    // bbb_ggg_rrr
    assign rgb_o =
-//hack
-//`define pf_only
-//`define mo_only
-`define pf_and_mo
- `ifdef pf_only
-		 area[1:0] == 2'b00 ? 9'b000_000_000 :
-		 area[1:0] == 2'b01 ? 9'b000_000_111 :
-		 area[1:0] == 2'b10 ? 9'b000_111_000 :
-		 area[1:0] == 2'b11 ? 9'b111_000_000 :
- `endif
- `ifdef mo_only
-		 gry == 2'b00 ? 9'b000_000_111 :
-		 gry == 2'b01 ? 9'b000_111_000 :
-		 gry == 2'b10 ? 9'b111_000_000 :
-		 gry == 2'b11 ? 9'b111_111_111 :
- `endif
- `ifdef pf_and_mo
-		 gry == 2'b00 & area[1:0] == 2'b00 ? 9'b000_000_000 :
-		 gry == 2'b00 & area[1:0] == 2'b01 ? 9'b000_000_111 :
-		 gry == 2'b00 & area[1:0] == 2'b10 ? 9'b000_111_000 :
-		 gry == 2'b00 & area[1:0] == 2'b11 ? 9'b111_000_000 :
-		 gry == 2'b01 ? 9'b000_000_111 :
-		 gry == 2'b10 ? 9'b000_111_000 :
-		 gry == 2'b11 ? 9'b111_000_000 :
- `endif
-		 0;
-`else
-   assign rgb_o = 
-		  rgbi == 4'b0000 ? 9'b000_000_000 :
-		  rgbi == 4'b0001 ? 9'b000_000_100 :
-		  rgbi == 4'b0010 ? 9'b000_100_000 :
-		  rgbi == 4'b0011 ? 9'b000_100_100 :
-		  rgbi == 4'b0100 ? 9'b100_000_000 :
-		  rgbi == 4'b0101 ? 9'b100_000_100 :
-		  rgbi == 4'b0110 ? 9'b100_100_000 :
-		  rgbi == 4'b0111 ? 9'b100_100_100 :
-		  rgbi == 4'b1000 ? 9'b000_000_000 :
-		  rgbi == 4'b1001 ? 9'b000_000_111 :
-		  rgbi == 4'b1010 ? 9'b000_111_000 :
-		  rgbi == 4'b1011 ? 9'b000_111_111 :
-		  rgbi == 4'b1100 ? 9'b111_000_000 :
-		  rgbi == 4'b1101 ? 9'b111_000_111 :
-		  rgbi == 4'b1110 ? 9'b111_111_000 :
-		  rgbi == 4'b1111 ? 9'b111_111_111 :
-		  0;
-`endif
+                  rgbi == 4'b0000 ? 9'b100_111_111 :
+                  rgbi == 4'b0001 ? 9'b100_111_000 :
+                  rgbi == 4'b0010 ? 9'b100_000_111 :
+                  rgbi == 4'b0011 ? 9'b100_000_000 :
+                  rgbi == 4'b0100 ? 9'b000_100_111 :
+                  rgbi == 4'b0101 ? 9'b000_100_000 :
+                  rgbi == 4'b0110 ? 9'b000_000_111 :
+                  rgbi == 4'b0111 ? 9'b000_000_000 :
+                  rgbi == 4'b1000 ? 9'b111_111_111 :
+                  rgbi == 4'b1001 ? 9'b111_111_000 :
+                  rgbi == 4'b1010 ? 9'b111_000_111 :
+                  rgbi == 4'b1011 ? 9'b111_000_000 :
+                  rgbi == 4'b1100 ? 9'b000_111_111 :
+                  rgbi == 4'b1101 ? 9'b000_111_000 :
+                  rgbi == 4'b1110 ? 9'b000_000_111 :
+                  rgbi == 4'b1111 ? 9'b000_000_000 :
+                  0;
 
    assign sync_o = comp_sync;
    assign hsync_o = hsync;
