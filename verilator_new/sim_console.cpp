@@ -215,12 +215,6 @@ void    DebugConsole::ExecCommand(const char* command_line)
 	ScrollToBottom = true;
 }
 
-//static int TextEditCallbackStub(ImGuiInputTextCallbackData* data) // In C++11 you are better off using lambdas for this sort of forwarding callbacks
-//{
-//	DebugConsole* console = (DebugConsole*)data->UserData;
-//	return console->TextEditCallback(data);
-//}
-
 int     DebugConsole::TextEditCallback(ImGuiInputTextCallbackData* data)
 {
 	//AddLog("cursor: %d, selection: %d-%d", data->CursorPos, data->SelectionStart, data->SelectionEnd);

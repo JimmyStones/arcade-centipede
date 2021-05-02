@@ -11,6 +11,6 @@ public:
 	void ClearLog();
 	void Draw(const char* title, bool* p_open);
 	void    ExecCommand(const char* command_line);
-	static int TextEditCallbackStub(ImGuiInputTextCallbackData* data);
+	/*static int TextEditCallbackStub(ImGuiInputTextCallbackData* data);*/
 	int     TextEditCallback(ImGuiInputTextCallbackData* data);
 };

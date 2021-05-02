@@ -886,6 +886,7 @@ module centipede(
    wire coin_r, coin_c, coin_l, self_test;
    wire cocktail, slam, start1, start2, fire2, fire1;
 
+
    assign coin_r = playerinput_i[9];
    assign coin_c = playerinput_i[8];
    assign coin_l = playerinput_i[7];
@@ -902,9 +903,7 @@ module centipede(
    
    assign playerin_out1 = { coin_r, coin_c, coin_l, slam, fire2, fire1, start2, start1 };
    assign playerin_out0 = { dir1, vblank, self_test, cocktail, tra };
-
-   assign playerin_out = ab[0] ? playerin_out1 : playerin_out0;
-   
+   assign playerin_out = ab[0] ? playerin_out1 : playerin_out0; 
    
    // Coin Counter Output
    reg [7:0] cc_latch;

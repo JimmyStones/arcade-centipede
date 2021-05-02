@@ -67,6 +67,7 @@ wire [9:0]ram_address;
 		 );
 
 always @(posedge clk) begin
+    $display("playerniput %x ", playerinput );
 if (ioctl_upload)
     $display("ioctl_addr %x ram_address %x ioctl_din %x ", ioctl_addr, ram_address ,ioctl_din );
 end
